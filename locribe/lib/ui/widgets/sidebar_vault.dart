@@ -13,36 +13,66 @@ class SidebarVault extends StatelessWidget {
     return BlocBuilder<VaultBloc, VaultState>(
       builder: (context, state) {
         if (state is VaultLoading) {
-          return const Center(child: CircularProgressIndicator(color: Colors.grey, strokeWidth: 2));
+          return const Center(
+            child: CircularProgressIndicator(
+              color: Color(0xFF2B6CE7),
+              strokeWidth: 2,
+            ),
+          );
         }
-        
+
         if (state is VaultLoaded) {
           if (state.transcripts.isEmpty) {
-            return const Center(
-              child: Text('No saved transcripts.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+            return const Padding(
+              padding: EdgeInsets.all(20),
+              child: Text(
+                'No saved transcripts yet.',
+                style: TextStyle(color: Color(0xFF64748B), fontSize: 13),
+              ),
             );
           }
 
-          return ListView.builder(
+          return ListView.separated(
             itemCount: state.transcripts.length,
+            separatorBuilder: (_, index) => const Divider(
+              color: Color(0xFFE5EAF2),
+              height: 1,
+            ),
             itemBuilder: (context, index) {
               final item = state.transcripts[index];
               return ListTile(
-                leading: const Icon(Icons.description_outlined, color: Colors.grey, size: 20),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                leading: Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEFF4FE),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(
+                    Icons.graphic_eq_rounded,
+                    color: Color(0xFF2B6CE7),
+                    size: 18,
+                  ),
+                ),
                 title: Text(
                   item['title'],
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 13),
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    color: Color(0xFF0F172A),
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 subtitle: Text(
                   item['created_at'].toString().split('T').first,
-                  style: const TextStyle(fontSize: 11, color: Colors.grey),
+                  style: const TextStyle(fontSize: 11.5, color: Color(0xFF64748B)),
                 ),
                 onTap: () {
                   context.read<ScribeBloc>().add(
                     LoadExistingTranscript(
-                      id: item['id'], // <-- Passes ID from SQLite
+                      id: item['id'],
                       rawTranscript: item['raw_transcript'],
                       summary: item['summary'],
                     ),
@@ -52,7 +82,7 @@ class SidebarVault extends StatelessWidget {
             },
           );
         }
-        
+
         return const SizedBox.shrink();
       },
     );

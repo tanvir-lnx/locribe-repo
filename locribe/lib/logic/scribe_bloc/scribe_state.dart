@@ -4,7 +4,7 @@ abstract class ScribeState extends Equatable {
   const ScribeState();
   
   @override
-  List<Object> get props => [];
+  List<Object?> get props => [];
 }
 
 class ScribeIdle extends ScribeState {}
@@ -21,15 +21,17 @@ class ScribeComplete extends ScribeState {
   final int id; // <-- Added ID tracking
   final String rawTranscript;
   final String summary;
+  final String? audioPath;
   
   const ScribeComplete({
     required this.id,
     required this.rawTranscript, 
     required this.summary,
+    this.audioPath,
   });
 
   @override
-  List<Object> get props => [id, rawTranscript, summary];
+  List<Object?> get props => [id, rawTranscript, summary, audioPath];
 }
 
 class ScribeError extends ScribeState {

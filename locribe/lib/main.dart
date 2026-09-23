@@ -6,8 +6,8 @@ import 'package:locribe/logic/vault_bloc/vault_bloc.dart';
 import 'package:locribe/logic/vault_bloc/vault_event.dart';
 import 'data/qvac_api_client.dart';
 import 'logic/scribe_bloc/scribe_bloc.dart';
-import 'ui/theme/app_theme.dart';
 import 'ui/responsive/responsive_layout.dart';
+import 'ui/theme/app_theme.dart';
 
 void main() {
   final apiClient = QvacApiClient();
@@ -40,7 +40,7 @@ class LoCribeApp extends StatelessWidget {
       title: 'LoCribe',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.darkTheme,
-      home: const ResponsiveLayout(), 
+      home: const ResponsiveLayout(),
     );
   }
 }

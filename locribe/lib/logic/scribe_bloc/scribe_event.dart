@@ -9,10 +9,17 @@ abstract class ScribeEvent extends Equatable {
 
 class AudioDropped extends ScribeEvent {
   final String filePath;
-  const AudioDropped(this.filePath);
+  final String summaryMode;
+  final int maxBullets;
+
+  const AudioDropped(
+    this.filePath, {
+    this.summaryMode = 'concise',
+    this.maxBullets = 3,
+  });
 
   @override
-  List<Object> get props => [filePath];
+  List<Object> get props => [filePath, summaryMode, maxBullets];
 }
 
 class LoadExistingTranscript extends ScribeEvent {
