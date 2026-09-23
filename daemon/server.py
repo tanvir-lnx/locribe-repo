@@ -14,6 +14,14 @@ from tetherto.qvac_sdk.models import (
 )
 
 WHISPER_MODEL = WHISPER_BASE_Q8_0
+SILENCE_HALLUCINATIONS = {
+    "you",
+    "thank you",
+    "thanks for watching",
+    "thanks for listening",
+    "subscribe",
+    "please subscribe",
+}
 
 _loaded: dict[str, str] = {}      # model name -> model_id (loaded once, reused)
 _load_lock = asyncio.Lock()
@@ -32,6 +40,20 @@ app = FastAPI(lifespan=lifespan)
 
 def print_progress(p):
     print(f"[LoCribe] Downloading model... {p.percentage:.0f}%", end="\r", flush=True)
+
+
+def _sentence_count(text: str) -> int:
+    return len([part for part in re.split(r"[.!?]+", text) if part.strip()])
+
+
+def _extract_concise_summary(text: str, max_bullets: int) -> str:
+    cleaned = re.sub(r"\s+", " ", text).strip()
+    if not cleaned:
+        return ""
+    segments = [part.strip() for part in re.split(r"[.!?]+", cleaned) if part.strip()]
+    if not segments:
+        return f"- {cleaned[:220]}"
+    return "\n".join(f"- {segment}" for segment in segments[:max_bullets])
 
 
 async def get_model(model_const) -> str:
@@ -62,6 +84,7 @@ def get_optimal_llm():
 
 @app.get("/status")
 async def status():
+    print("[LoCribe] Status ping")
     return {"status": "ready"}
 
 
@@ -92,8 +115,13 @@ async def transcribe_audio(file: UploadFile = File(...)):
             if chunk.done:
                 break
 
-        return {"text": text.strip()}
+        cleaned_text = text.strip()
+        if cleaned_text.casefold() in SILENCE_HALLUCINATIONS:
+            cleaned_text = ""
+        return {"text": cleaned_text}
 
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[Error] {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -103,15 +131,37 @@ async def transcribe_audio(file: UploadFile = File(...)):
 
 
 @app.post("/summarize")
-async def summarize_text(text: str = Form(...)):
+async def summarize_text(
+    text: str = Form(...),
+    mode: str = Form("concise"),
+    max_bullets: int = Form(3),
+):
     try:
+        cleaned_text = text.strip()
+        if not cleaned_text:
+            raise HTTPException(status_code=400, detail="Text for summarization is empty.")
+
+        bounded_bullets = max(1, min(max_bullets, 6))
+        sentence_count = _sentence_count(cleaned_text)
+
+        # For very short transcripts, skip the LLM entirely for faster UX.
+        if len(cleaned_text) <= 220 or sentence_count <= 2:
+            return {"summary": _extract_concise_summary(cleaned_text, bounded_bullets)}
+
         llm = get_optimal_llm()
         model_id = await get_model(llm)
 
-        prompt = (
-            "Provide a clean, formatted Markdown executive summary with bullet points "
-            f"for the following text:\n\n{text}"
-        )
+        prompt = f"""
+You are summarizing a transcript.
+Return Markdown only as bullet points.
+Keep it concise and faithful to the transcript.
+Do not add details not present in input.
+Maximum bullet points: {bounded_bullets}.
+Maximum total words: {80 if mode == "concise" else 150}.
+
+Transcript:
+{cleaned_text}
+""".strip()
 
         print(f"[LoCribe] Generating summary offline with {llm.name}...")
 
@@ -119,11 +169,24 @@ async def summarize_text(text: str = Form(...)):
             app.state.transport,
             model_id=model_id,
             history=[{"role": "user", "content": prompt}],
-            generation_params={"temp": 0.3, "predict": 1024},
+            generation_params={
+                "temp": 0.2,
+                "predict": 220 if mode == "concise" else 360,
+            },
         )
         final = await run.final
 
         summary = re.sub(r"<think>.*?</think>", "", final.content_text, flags=re.S).strip()
+        if not summary:
+            summary = _extract_concise_summary(cleaned_text, bounded_bullets)
+
+        lines = [line.strip() for line in summary.splitlines() if line.strip()]
+        bullet_lines = [line for line in lines if line.startswith(("-", "*"))]
+        if bullet_lines:
+            summary = "\n".join(bullet_lines[:bounded_bullets])
+        else:
+            summary = _extract_concise_summary(summary, bounded_bullets)
+
         return {"summary": summary}
 
     except Exception as e:
