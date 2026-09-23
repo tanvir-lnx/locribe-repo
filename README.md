@@ -386,4 +386,6 @@ The roadmap is intentionally focused on making the local workflow reliable befor
 
 ## License
 
-No license has been selected for this repository yet. Add a license before distributing LoCribe outside the project team.
+LoCribe is licensed under the [GNU General Public License v3.0](./LICENSE)
+(GPL-3.0-or-later). You may use, modify, and redistribute the project under
+the terms of that license. See [LICENSE](./LICENSE) for the complete terms.
