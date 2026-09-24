@@ -225,7 +225,13 @@ After transcription, the Flutter client requests:
 POST http://127.0.0.1:8000/summarize
 ```
 
-Short transcripts are summarized deterministically into concise bullet points. Longer transcripts use a locally selected Qwen model based on available system memory. The daemon limits the number of returned bullets and removes model thinking tags before returning Markdown.
+The pipeline has two different model roles: QVAC's Whisper Large v3 Turbo is
+used exclusively for audio-to-text transcription, while a locally selected
+Qwen instruction model is used to summarize the resulting text. All non-empty
+transcripts, including short voice memos, go through the summarizer. The daemon
+preserves the uploaded audio container extension, limits the number of returned
+bullets, disables captured reasoning, and removes any leaked model thinking
+tags before returning Markdown.
 
 ### Local vault
 
