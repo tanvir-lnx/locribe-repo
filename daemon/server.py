@@ -3,6 +3,7 @@ import os
 import re
 import tempfile
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from tetherto.qvac_sdk import Client, TranscribeRequest, completion, load_model, transcribe
@@ -10,10 +11,12 @@ from tetherto.qvac_sdk.models import (
     QWEN3_1_7B_INST_Q4,
     QWEN3_4B_INST_Q4_K_M,
     QWEN3_8B_INST_Q4_K_M,
-    WHISPER_BASE_Q8_0,
+    WHISPER_LARGE_V3_TURBO,
 )
 
-WHISPER_MODEL = WHISPER_BASE_Q8_0
+# Large v3 Turbo is a speech-to-text model, rather than a general-purpose LLM.
+# It is substantially more accurate than the base model for short voice memos.
+WHISPER_MODEL = WHISPER_LARGE_V3_TURBO
 SILENCE_HALLUCINATIONS = {
     "you",
     "thank you",
@@ -42,10 +45,6 @@ def print_progress(p):
     print(f"[LoCribe] Downloading model... {p.percentage:.0f}%", end="\r", flush=True)
 
 
-def _sentence_count(text: str) -> int:
-    return len([part for part in re.split(r"[.!?]+", text) if part.strip()])
-
-
 def _extract_concise_summary(text: str, max_bullets: int) -> str:
     cleaned = re.sub(r"\s+", " ", text).strip()
     if not cleaned:
@@ -54,6 +53,13 @@ def _extract_concise_summary(text: str, max_bullets: int) -> str:
     if not segments:
         return f"- {cleaned[:220]}"
     return "\n".join(f"- {segment}" for segment in segments[:max_bullets])
+
+
+def _remove_model_thinking(text: str) -> str:
+    """Remove Qwen reasoning even when the backend omits the closing tag."""
+    without_complete_tags = re.sub(r"<think>.*?</think>", "", text, flags=re.S | re.I)
+    without_open_tag = re.sub(r"<think>.*$", "", without_complete_tags, flags=re.S | re.I)
+    return re.sub(r"</think>", "", without_open_tag, flags=re.I).strip()
 
 
 async def get_model(model_const) -> str:
@@ -94,11 +100,17 @@ async def transcribe_audio(file: UploadFile = File(...)):
     try:
         model_id = await get_model(WHISPER_MODEL)
 
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+        # Preserve the actual container extension. Recordings from the Flutter
+        # client are commonly M4A, and labeling those bytes as WAV can make the
+        # speech backend reject or misread an otherwise valid recording.
+        suffix = Path(file.filename or "").suffix.lower()
+        if suffix not in {".wav", ".m4a", ".mp3", ".aac", ".flac", ".ogg", ".webm"}:
+            suffix = ".audio"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             tmp.write(await file.read())
             tmp_path = tmp.name
 
-        print("[LoCribe] Processing audio locally...")
+        print(f"[LoCribe] Transcribing audio with {WHISPER_MODEL.name}...")
 
         request = TranscribeRequest.model_validate({
             "type": "transcribe",
@@ -142,28 +154,22 @@ async def summarize_text(
             raise HTTPException(status_code=400, detail="Text for summarization is empty.")
 
         bounded_bullets = max(1, min(max_bullets, 6))
-        sentence_count = _sentence_count(cleaned_text)
-
-        # For very short transcripts, skip the LLM entirely for faster UX.
-        if len(cleaned_text) <= 220 or sentence_count <= 2:
-            return {"summary": _extract_concise_summary(cleaned_text, bounded_bullets)}
-
         llm = get_optimal_llm()
         model_id = await get_model(llm)
 
         prompt = f"""
-You are summarizing a transcript.
-Return Markdown only as bullet points.
-Keep it concise and faithful to the transcript.
-Do not add details not present in input.
-Maximum bullet points: {bounded_bullets}.
-Maximum total words: {80 if mode == "concise" else 150}.
+You are a careful voice-memo summarizer. Summarize the transcript, do not repeat
+it verbatim. Identify the main point, decisions, tasks, or useful details that
+are explicitly stated. For a very short memo, rewrite it as a concise note.
+Never invent names, facts, intentions, or context that are not in the
+transcript. Return Markdown only, using at most {bounded_bullets} bullet points
+and at most {80 if mode == "concise" else 150} total words.
 
 Transcript:
 {cleaned_text}
 """.strip()
 
-        print(f"[LoCribe] Generating summary offline with {llm.name}...")
+        print(f"[LoCribe] Summarizing transcript with {llm.name}...")
 
         run = completion(
             app.state.transport,
@@ -173,10 +179,11 @@ Transcript:
                 "temp": 0.2,
                 "predict": 220 if mode == "concise" else 360,
             },
+            capture_thinking=False,
         )
         final = await run.final
 
-        summary = re.sub(r"<think>.*?</think>", "", final.content_text, flags=re.S).strip()
+        summary = _remove_model_thinking(final.content_text)
         if not summary:
             summary = _extract_concise_summary(cleaned_text, bounded_bullets)
 
